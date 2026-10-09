@@ -182,6 +182,7 @@
   html.embed body { overflow: hidden; }
   html.embed .scrim { position: absolute; align-items: flex-start; padding-top: 88px; }
   html.embed .sheet { max-height: none; }
+  .app-version { margin: 0; padding: 0 var(--felt-space-s) var(--felt-space-xs); text-align: center; color: var(--felt-text-muted); font-size: var(--felt-text-xxs-size); }
   .file-row strong { font-weight: var(--font-weight-medium); overflow-wrap: anywhere; display: block; }
 </style>
 </head>
@@ -277,6 +278,8 @@
     </div>
   </aside>
 </main>
+<p class="app-version">Version v8 · Oct 9, 2026 4:45 PM</p>
+<script>{ const v = document.querySelector('.app-version'); if (v.textContent.includes('__')) v.textContent = 'Local preview (not published)'; }</script>
 
 <div class="scrim hidden" id="exportSheet" role="dialog" aria-modal="true" aria-labelledby="title-exporting">
   <div class="sheet">
@@ -448,7 +451,7 @@ function geometry(w, h) {
   g.headX = w * 0.075;
   g.headMaxW = (profile ? g.logoSlot.x - w * 0.04 : w * 0.85) - g.headX;
   g.nameY = h * 0.15; g.nameFs = 56 * k;
-  g.titleY = h * 0.215; g.titleFs = 34 * k;
+  g.titleY = h * 0.222; g.titleFs = 38 * k;
   return g;
 }
 // Shrink a single line until it fits its width
