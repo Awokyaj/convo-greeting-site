@@ -183,11 +183,27 @@
   html.embed .scrim { position: absolute; align-items: flex-start; padding-top: 88px; }
   html.embed .sheet { max-height: none; }
   .app-version { margin: 0; padding: 0 var(--felt-space-s) var(--felt-space-xs); text-align: center; color: var(--felt-text-muted); font-size: var(--felt-text-xxs-size); }
+  /* Phones and small windows: show a note instead of the editor */
+  .small-screen { display: none; }
+  @media (max-width: 719px), (pointer: coarse) and (max-height: 500px) {
+    .topbar, main, .scrim { display: none !important; }
+    .small-screen { display: grid; justify-items: center; gap: var(--felt-space-xs); text-align: center;
+                    padding: var(--felt-space-l, 48px) 24px; max-width: 420px; margin: 0 auto; }
+  }
+  .small-screen svg.lucide { width: 40px; height: 40px; color: var(--felt-primary); }
+  .small-screen h2 { margin: 0; font-family: var(--font-family-display); font-weight: var(--font-weight-medium);
+                     font-size: var(--felt-text-l-size); line-height: var(--felt-text-l-line); letter-spacing: var(--felt-text-l-tracking); }
+  .small-screen p { margin: 0; color: var(--felt-text-muted); font-size: var(--felt-text-s-size); line-height: var(--felt-text-s-line); }
   .file-row strong { font-weight: var(--font-weight-medium); overflow-wrap: anywhere; display: block; }
 </style>
 </head>
 <body>
 <script>if (window.self !== window.top) document.documentElement.classList.add('embed');</script>
+<section class="small-screen" aria-label="Open on a computer">
+  <i data-lucide="monitor"></i>
+  <h2>Convo Greeting works best on a computer</h2>
+  <p>Please open this page on a desktop or laptop to create your greeting.</p>
+</section>
 <header class="topbar">
   <img id="wordmark" src="https://brand.convo.io/cdn/v1/assets/logo/wordmark/Convo_Wordmark_Evergreen.svg" alt="Convo">
   <span class="name">Greeting</span>
@@ -278,7 +294,7 @@
     </div>
   </aside>
 </main>
-<p class="app-version">Version v8 · Oct 9, 2026 4:45 PM</p>
+<p class="app-version">Version v9 · Oct 9, 2026 5:11 PM</p>
 <script>{ const v = document.querySelector('.app-version'); if (v.textContent.includes('__')) v.textContent = 'Local preview (not published)'; }</script>
 
 <div class="scrim hidden" id="exportSheet" role="dialog" aria-modal="true" aria-labelledby="title-exporting">
