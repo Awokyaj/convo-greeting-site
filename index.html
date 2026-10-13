@@ -190,15 +190,38 @@
     .small-screen { display: grid; justify-items: center; gap: var(--felt-space-xs); text-align: center;
                     padding: var(--felt-space-l, 48px) 24px; max-width: 420px; margin: 0 auto; }
   }
-  .small-screen svg.lucide { width: 40px; height: 40px; color: var(--felt-primary); }
-  .small-screen h2 { margin: 0; font-family: var(--font-family-display); font-weight: var(--font-weight-medium);
+  /* Browsers that cannot export MP4 (e.g. Firefox): same note, shown at any size */
+  .unsupported-note { display: none; }
+  html.unsupported .topbar, html.unsupported main, html.unsupported .scrim, html.unsupported .small-screen { display: none !important; }
+  html.unsupported .unsupported-note { display: grid; justify-items: center; gap: var(--felt-space-xs); text-align: center;
+                                       padding: var(--felt-space-l, 48px) 24px; max-width: 460px; margin: 0 auto; }
+  .small-screen svg.lucide, .unsupported-note svg.lucide { width: 40px; height: 40px; color: var(--felt-primary); }
+  .small-screen h2, .unsupported-note h2 { margin: 0; font-family: var(--font-family-display); font-weight: var(--font-weight-medium);
                      font-size: var(--felt-text-l-size); line-height: var(--felt-text-l-line); letter-spacing: var(--felt-text-l-tracking); }
-  .small-screen p { margin: 0; color: var(--felt-text-muted); font-size: var(--felt-text-s-size); line-height: var(--felt-text-s-line); }
+  .small-screen p, .unsupported-note p { margin: 0; color: var(--felt-text-muted); font-size: var(--felt-text-s-size); line-height: var(--felt-text-s-line); }
   .file-row strong { font-weight: var(--font-weight-medium); overflow-wrap: anywhere; display: block; }
 </style>
 </head>
 <body>
-<script>if (window.self !== window.top) document.documentElement.classList.add('embed');</script>
+<script>
+if (window.self !== window.top) document.documentElement.classList.add('embed');
+// The greeting is exported as MP4 recorded from the canvas; without that this browser cannot make one
+(function () {
+  var mp4 = ['video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4;codecs=avc1.42E01E', 'video/mp4'];
+  var ok = false;
+  try {
+    ok = !!(window.MediaRecorder && MediaRecorder.isTypeSupported && HTMLCanvasElement.prototype.captureStream &&
+            mp4.some(function (t) { return MediaRecorder.isTypeSupported(t); }) &&
+            window.CSS && CSS.supports('container-type', 'inline-size'));
+  } catch (e) {}
+  if (!ok) document.documentElement.classList.add('unsupported');
+})();
+</script>
+<section class="unsupported-note" aria-label="Browser not supported">
+  <svg class="lucide" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
+  <h2>Convo Greeting doesn't work in this browser</h2>
+  <p>Please open this page in Chrome, Edge or Safari on a computer to create your greeting.</p>
+</section>
 <section class="small-screen" aria-label="Open on a computer">
   <i data-lucide="monitor"></i>
   <h2>Convo Greeting works best on a computer</h2>
@@ -294,7 +317,7 @@
     </div>
   </aside>
 </main>
-<p class="app-version">Version v10 · Oct 13, 2026 6:35 PM</p>
+<p class="app-version">Version v11 · Oct 13, 2026 6:42 PM</p>
 <script>{ const v = document.querySelector('.app-version'); if (v.textContent.includes('__')) v.textContent = 'Local preview (not published)'; }</script>
 
 <div class="scrim hidden" id="exportSheet" role="dialog" aria-modal="true" aria-labelledby="title-exporting">
