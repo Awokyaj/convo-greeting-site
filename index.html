@@ -294,7 +294,7 @@
     </div>
   </aside>
 </main>
-<p class="app-version">Version v9 · Oct 9, 2026 5:11 PM</p>
+<p class="app-version">Version v10 · Oct 13, 2026 6:35 PM</p>
 <script>{ const v = document.querySelector('.app-version'); if (v.textContent.includes('__')) v.textContent = 'Local preview (not published)'; }</script>
 
 <div class="scrim hidden" id="exportSheet" role="dialog" aria-modal="true" aria-labelledby="title-exporting">
@@ -446,7 +446,8 @@ function setupSeg(el, onChange) {
     if (d) { e.preventDefault(); select(opts[(i + d + opts.length) % opts.length], true); }
   });
 }
-setupSeg($('#voiceSwitch'), b => state.gender = b.dataset.voice);
+setupSeg($('#voiceSwitch'), b => { stopPreview(); state.gender = b.dataset.voice; });
+$('#pronounce').addEventListener('input', () => stopPreview());
 setupSeg($('#styleSwitch'), b => { state.msgStyle = b.dataset.style; refresh(); });
 setupSeg($('#layoutSwitch'), b => { state.layout = b.dataset.layout; refresh(); });
 
@@ -640,8 +641,10 @@ function drawStage() {
   $('#logoRemove').classList.toggle('hidden', !state.logo);
 }
 const refresh = () => { drawStage(); drawThumbs(); };
+// A preview plays a snapshot of the cards and voice; changing them stops it (exports are locked behind their dialog)
+const stopPreview = () => { if (state.playing && !exportStep) state.stopFn(); };
 
-msgEdit.addEventListener('input', () => { state.cards[state.active] = msgEdit.value; drawStage(); drawThumb(state.active); });
+msgEdit.addEventListener('input', () => { stopPreview(); state.cards[state.active] = msgEdit.value; drawStage(); drawThumb(state.active); });
 nameEdit.addEventListener('input', () => { state.name = nameEdit.value; refresh(); });
 titleEdit.addEventListener('input', () => { state.title = titleEdit.value; refresh(); });
 [msgEdit, nameEdit, titleEdit].forEach(el => el.addEventListener('keydown', e => { if (e.key === 'Escape') el.blur(); }));
@@ -662,6 +665,7 @@ function renderStrip() {
       ${state.cards.length > 1 ? `<button class="icon thumb-del" aria-label="Remove card ${i + 1}"><i data-lucide="x"></i></button>` : ''}`;
     wrapEl.querySelector('.thumb').addEventListener('click', () => selectCard(i));
     wrapEl.querySelector('.thumb-del')?.addEventListener('click', () => {
+      stopPreview();
       state.cards.splice(i, 1); state.aligns.splice(i, 1);
       selectCard(Math.min(state.active > i ? state.active - 1 : state.active, state.cards.length - 1));
     });
@@ -672,6 +676,7 @@ function renderStrip() {
   add.innerHTML = '<i data-lucide="plus"></i><span>Add card</span>';
   add.disabled = state.cards.length >= MAX_CARDS;
   add.addEventListener('click', () => {
+    stopPreview();
     state.cards.push(''); state.aligns.push(state.aligns[state.active] || 'center');
     selectCard(state.cards.length - 1);
     msgEdit.focus();
@@ -838,6 +843,8 @@ async function ensureVoice(report, shouldStop = () => false) {
     tl.push({ text: cards[c], start: start / rate, end: pos / rate });
   });
   state.ttsVoice = { buffer, timeline: tl, key };
+  // Cards, voice or pronunciations changed while this was being made: make it again for what is there now
+  if (needsVoice()) return ensureVoice(report, shouldStop);
   report('Voiceover ready', 1);
 }
 
