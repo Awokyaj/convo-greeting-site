@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Convo Greeting</title>
 <!-- Convo brand tokens and fonts: linked, never copied -->
-<link rel="stylesheet" href="https://brand.convo.io/cdn/v1/brand.css">
-<script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+<link rel="stylesheet" href="https://brand.convo.io/cdn/v1/brand.css" onerror="window.assetFailed = (window.assetFailed || []).concat('brand styles')">
+<script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js" onerror="window.assetFailed = (window.assetFailed || []).concat('icons')"></script>
 <style>
   * { box-sizing: border-box; }
   body {
@@ -204,6 +204,17 @@
   .rec-file { display: grid; gap: 8px; }
   .rec-file strong { font-weight: var(--font-weight-medium); overflow-wrap: anywhere; }
   .rec-file button { justify-self: start; }
+  /* Something broke: a friendly note with a way to tell Jay */
+  .problem .sheet { display: grid; gap: var(--felt-space-xs, 12px); background: var(--felt-raised, #2a2a28); color: var(--felt-text, #fff);
+                    font-family: var(--font-family-body, system-ui, sans-serif); border-radius: var(--felt-radius-l, 20px); padding: var(--felt-space-m, 24px); }
+  .problem h2 { margin: 0; font-family: var(--font-family-display, inherit); font-weight: var(--font-weight-medium, 500); font-size: var(--felt-text-l-size, 22px); line-height: 1.25; }
+  .problem p { margin: 0; color: var(--felt-text-muted, #bbb); font-size: var(--felt-text-s-size, 16px); line-height: 1.45; }
+  .problem .tell { color: var(--felt-text, #fff); }
+  .problem .detail { font-size: var(--felt-text-xxs-size, 12px); line-height: 1.4; overflow-wrap: anywhere; opacity: 0.8; }
+  .problem .sheet-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; margin-top: 8px; }
+  .problem a.primary { display: inline-flex; align-items: center; gap: 8px; text-decoration: none; padding: 10px 20px; border-radius: var(--radius-pill, 999px);
+                       background: var(--felt-primary, #00aa55); color: var(--felt-on-primary, #000); font-weight: var(--font-weight-medium, 500); }
+  .problem button { font: inherit; }
   .file-row strong { font-weight: var(--font-weight-medium); overflow-wrap: anywhere; display: block; }
 </style>
 </head>
@@ -336,9 +347,22 @@ if (window.self !== window.top) document.documentElement.classList.add('embed');
     </div>
   </aside>
 </main>
-<p class="app-version">Version v12 · Oct 20, 2026 9:52 AM</p>
+<p class="app-version">Version v13 · Oct 20, 2026 9:58 AM</p>
 <script>{ const v = document.querySelector('.app-version'); if (v.textContent.includes('__')) v.textContent = 'Local preview (not published)'; }</script>
 
+<div class="scrim problem hidden" id="problemSheet" role="alertdialog" aria-modal="true" aria-labelledby="problemTitle" aria-describedby="problemText">
+  <div class="sheet">
+    <h2 id="problemTitle"></h2>
+    <p id="problemText"></p>
+    <p class="detail" id="problemDetail"></p>
+    <p class="tell">Still not working? Please let Jay know. A quick note helps get it fixed for everyone.</p>
+    <div class="sheet-actions">
+      <button class="ghost" id="problemCopy">Copy details</button>
+      <button class="ghost" id="problemClose">Close</button>
+      <a class="primary" id="problemEmail" target="_blank" rel="noopener">Email Jay</a>
+    </div>
+  </div>
+</div>
 <div class="scrim hidden" id="exportSheet" role="dialog" aria-modal="true" aria-labelledby="title-exporting">
   <div class="sheet">
     <section data-step="exporting" class="hidden">
@@ -364,6 +388,61 @@ if (window.self !== window.top) document.documentElement.classList.add('embed');
 
 <script>
 const $ = s => document.querySelector(s);
+
+/* ---------- When something breaks: tell the viewer kindly, and make it easy to tell Jay ---------- */
+const REPORT_TO = 'jay@convorelay.com';
+const PROBLEMS = {
+  voice:   ['We couldn\u2019t create the voice', 'The voice didn\u2019t load this time. This is usually a short hiccup, so please try again in a minute.'],
+  speech:  ['We couldn\u2019t read your recording', 'The part that turns your recording into cards didn\u2019t load. Your recording is still here, so please try again in a minute.'],
+  export:  ['Your video didn\u2019t finish', 'Something went wrong while making your video files. Please try exporting again.'],
+  assets:  ['Part of this page didn\u2019t load', 'Some of the page\u2019s files didn\u2019t load, so things may look a little off. Refreshing the page usually fixes it.'],
+  unknown: ['Something unexpected happened', 'Sorry about that! Refreshing the page usually helps.'],
+};
+const PROBLEM_CODES = { voice: 'CG-VOICE', speech: 'CG-SPEECH', export: 'CG-EXPORT', assets: 'CG-ASSETS', unknown: 'CG-UNKNOWN' };
+// The last progress message shown ("Loading the voice model…"), so a report says what the page was doing
+let lastStep = '';
+const noteStep = msg => { if (msg) lastStep = String(msg).replace(/…$/, ''); };
+const clearStep = () => { lastStep = ''; }; // a task finished, so its step no longer explains anything
+let problemOpen = false, problemDetails = '';
+function reportProblem(kind, err) {
+  console.error(kind, err);
+  if (problemOpen) return; // one at a time; the first is the one that matters
+  const [title, text] = PROBLEMS[kind] || PROBLEMS.unknown;
+  const offline = navigator.onLine === false;
+  $('#problemTitle').textContent = title;
+  $('#problemText').textContent = (offline ? 'It looks like you\u2019re offline. Check your internet connection, then try again. ' : '') + text;
+  const code = PROBLEM_CODES[kind] || PROBLEM_CODES.unknown;
+  const message = String(err && (err.message || err) || 'no message').replace(/\s+/g, ' ').trim();
+  const step = kind === 'assets' ? 'Opening the page' : lastStep;
+  $('#problemDetail').textContent = [`Error ${code}`, step && `While: ${step}`, message.length > 140 ? message.slice(0, 140) + '…' : message].filter(Boolean).join(' · ');
+  problemDetails = [
+    `What happened: ${title}`,
+    `Error code: ${code}`,
+    `While: ${step || 'not known'}`,
+    `Error: ${message}`,
+    `Page: ${$('.app-version')?.textContent || ''}${window.self !== window.top ? ' (embedded)' : ''}`,
+    `Online: ${offline ? 'no' : 'yes'}`,
+    `Browser: ${navigator.userAgent}`,
+    `Time: ${new Date().toString()}`,
+  ].join('\n');
+  $('#problemEmail').href = `mailto:${REPORT_TO}?subject=${encodeURIComponent('Convo Greeting: ' + title)}&body=${encodeURIComponent('Hi Jay,\n\nConvo Greeting showed me an error.\n\n' + problemDetails + '\n')}`;
+  clearStep();
+  $('#problemCopy').textContent = 'Copy details';
+  $('#problemSheet').classList.remove('hidden');
+  problemOpen = true;
+  if (window.self !== window.top) window.parent.postMessage({ type: 'convo-greeting:scroll-top' }, '*');
+  $('#problemClose').focus();
+}
+$('#problemClose').addEventListener('click', () => { $('#problemSheet').classList.add('hidden'); problemOpen = false; });
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && problemOpen) $('#problemClose').click(); });
+$('#problemCopy').addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText(problemDetails); $('#problemCopy').textContent = 'Copied'; }
+  catch { $('#problemCopy').textContent = 'Could not copy'; }
+});
+// (Browsers report a harmless 'ResizeObserver loop' warning as an error; it is not a problem)
+window.addEventListener('error', e => { if (e.message && !/ResizeObserver loop/.test(e.message)) reportProblem('unknown', e.error || e.message); });
+window.addEventListener('unhandledrejection', e => reportProblem('unknown', e.reason));
+window.addEventListener('load', () => { if (window.assetFailed) reportProblem('assets', 'Did not load: ' + window.assetFailed.join(', ')); });
 const token = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 const icons = () => window.lucide && lucide.createIcons();
 const clamp = v => Math.max(0, Math.min(1, v));
@@ -416,7 +495,7 @@ const state = {
 };
 let audioCtx;
 const getAudioCtx = () => (audioCtx ||= new (window.AudioContext || window.webkitAudioContext)());
-const status = (msg, tone) => { $('#status').textContent = msg || ''; $('#status').dataset.tone = tone || ''; };
+const status = (msg, tone) => { if (tone !== 'error') noteStep(msg); $('#status').textContent = msg || ''; $('#status').dataset.tone = tone || ''; };
 // Tidy a card: collapse spaces, keep line breaks and single blank lines between paragraphs
 const normCard = text => text.replace(/\r/g, '').split('\n').map(l => l.replace(/[ \t ]+/g, ' ').trim())
   .join('\n').replace(/\n{3,}/g, '\n\n').trim();
@@ -880,7 +959,7 @@ function cardsFromChunks(chunks, duration) {
     }
   }
 }
-const recStatus = (msg, tone = '') => { $('#recStatus').textContent = msg; $('#recStatus').dataset.tone = tone; };
+const recStatus = (msg, tone = '') => { if (tone !== 'error') noteStep(msg); $('#recStatus').textContent = msg; $('#recStatus').dataset.tone = tone; };
 let reading = false;
 async function setRecording(file) {
   if (reading) return;
@@ -900,6 +979,7 @@ async function setRecording(file) {
     $('#recName').textContent = file.name;
     $('#voicePreview').src = URL.createObjectURL(file);
     $('#recFile').classList.remove('hidden');
+    noteStep('Reading the words in your recording');
     const chunks = await transcribe(await toMono16k(buffer), msg => recStatus(msg));
     const cards = cardsFromChunks(chunks, buffer.duration);
     if (!cards.length) { recStatus('No words were heard in this recording. You can still type your cards.', 'error'); return; }
@@ -909,14 +989,16 @@ async function setRecording(file) {
     selectCard(0);
     recStatus(`${cards.length === 1 ? 'One card was' : cards.length + ' cards were'} made from your recording. Check the words and fix anything that was misheard.`);
   } catch (e) {
-    console.error(e);
-    const msg = e.message === 'unreadable' ? 'That file could not be read. Try MP3, WAV, M4A or MP4.'
-      : e.message === 'too-long' ? 'That recording is longer than 90 seconds. Please use a shorter one.'
-      : 'The words could not be read from your recording. Check your connection and try again.';
-    if (e.message === 'unreadable' || e.message === 'too-long') clearRecording();
-    recStatus(msg, 'error');
+    // The person's file: say so beside it. Anything else is the speech tool not working
+    if (e.message === 'unreadable' || e.message === 'too-long') {
+      clearRecording();
+      recStatus(e.message === 'unreadable' ? 'That file could not be read. Try MP3, WAV, M4A or MP4.' : 'That recording is longer than 90 seconds. Please use a shorter one.', 'error');
+    } else {
+      recStatus('');
+      reportProblem('speech', e);
+    }
   } finally {
-    reading = false;
+    reading = false; clearStep();
     $('#playBtn').disabled = $('#exportBtn').disabled = false;
   }
 }
@@ -1094,8 +1176,8 @@ $('#hearBtn').addEventListener('click', async () => {
     status(`Playing: ${words.join(', ')}`);
     src.onended = () => { if ($('#status').textContent.startsWith('Playing:')) status(''); };
   } catch (e) {
-    console.error(e);
-    status('The sample could not be created. Check your connection and try again.', 'error');
+    status('');
+    reportProblem('voice', e);
   } finally { sampling = false; $('#hearBtn').disabled = false; }
 });
 
@@ -1167,11 +1249,11 @@ $('#playBtn').addEventListener('click', async () => {
       await ensureVoice(msg => status(msg));
       status('');
     } catch (e) {
-      console.error(e);
-      status('The voiceover could not be created. Check your connection and try again.', 'error');
+      status('');
+      reportProblem('voice', e);
       return;
     } finally {
-      preparing = false;
+      preparing = false; clearStep();
       $('#playBtn').disabled = $('#exportBtn').disabled = false;
       setPlayBtn(false);
     }
@@ -1213,11 +1295,12 @@ $('#exportBtn').addEventListener('click', async () => {
   let stopped = false;
   $('#stopExport').onclick = () => { stopped = true; if (state.playing) state.stopFn(); };
   const setMeter = (frac, left = '', right = '') => {
+    noteStep(left);
     const p = Math.round(clamp(frac) * 100);
     $('#meterFill').style.width = p + '%'; $('#meter').setAttribute('aria-valuenow', p);
     $('#meterPct').textContent = left || p + '%'; $('#meterTime').textContent = right;
   };
-  const endEarly = msg => { $('#exportBtn').disabled = $('#playBtn').disabled = false; showStep(null); status(msg, stopped ? '' : 'error'); };
+  const endEarly = msg => { clearStep(); $('#exportBtn').disabled = $('#playBtn').disabled = false; showStep(null); status(msg, stopped ? '' : 'error'); };
   $('#exportBtn').disabled = $('#playBtn').disabled = true;
   showStep('exporting');
   status('');
@@ -1225,24 +1308,27 @@ $('#exportBtn').addEventListener('click', async () => {
   // Step 1: create the voiceover if needed
   const twoSteps = needsVoice();
   if (twoSteps) {
-    $('#meterStep').textContent = 'Step 1 of 2: Creating the voiceover';
+    $('#meterStep').textContent = 'Step 1 of 2: Creating the voiceover'; noteStep('Export: creating the voiceover');
     setMeter(0);
     try {
       await ensureVoice((msg, frac) => setMeter(frac ?? 0, msg), () => stopped);
     } catch (e) {
-      if (!stopped) console.error(e);
-      return endEarly(stopped ? 'Export stopped.' : 'The voiceover could not be created. Check your connection and try again.');
+      if (stopped) return endEarly('Export stopped.');
+      reportProblem('voice', e);
+      return endEarly('');
     }
     if (stopped) return endEarly('Export stopped.');
   }
 
   // Step 2: play the greeting once, recording both sizes at the same time.
   // 352 × 288 is the videophone size: the 4:3 frame is scaled into it, as videophones expect.
-  $('#meterStep').textContent = twoSteps ? 'Step 2 of 2: Recording both videos' : 'Recording both videos';
+  $('#meterStep').textContent = twoSteps ? 'Step 2 of 2: Recording both videos' : 'Recording both videos'; noteStep('Export: recording both videos');
   setMeter(0);
   const voice = activeVoice(), ac = getAudioCtx(), dest = ac.createMediaStreamDestination();
   const audioTrack = voice ? dest.stream.getAudioTracks()[0] : null;
-  const outs = EXPORTS.map((ex, n) => {
+  let outs;
+  try {
+  outs = EXPORTS.map((ex, n) => {
     const canvas = document.createElement('canvas'); canvas.width = ex.w; canvas.height = ex.h;
     const c2 = canvas.getContext('2d'); c2.imageSmoothingQuality = 'high';
     const tracks = [...canvas.captureStream(30).getVideoTracks()];
@@ -1254,6 +1340,10 @@ $('#exportBtn').addEventListener('click', async () => {
     return { ex, c2, rec, finished };
   });
   outs.forEach(o => o.rec.start(250));
+  } catch (e) {
+    reportProblem('export', e);
+    return endEarly('');
+  }
   play({
     dest,
     onFrame: () => outs.forEach(o => o.c2.drawImage(cv, 0, 0, o.ex.w, o.ex.h)),
@@ -1263,6 +1353,8 @@ $('#exportBtn').addEventListener('click', async () => {
   const blobs = await Promise.all(outs.map(o => o.finished));
   $('#exportBtn').disabled = $('#playBtn').disabled = false;
   if (stopped) return endEarly('Export stopped.');
+  if (blobs.some(b => !b.size)) { reportProblem('export', 'A video file came out empty'); return endEarly(''); }
+  clearStep();
 
   outs.forEach((o, n) => {
     const key = o.ex.key;
