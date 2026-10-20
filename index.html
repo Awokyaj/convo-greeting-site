@@ -199,6 +199,11 @@
   .small-screen h2, .unsupported-note h2 { margin: 0; font-family: var(--font-family-display); font-weight: var(--font-weight-medium);
                      font-size: var(--felt-text-l-size); line-height: var(--felt-text-l-line); letter-spacing: var(--felt-text-l-tracking); }
   .small-screen p, .unsupported-note p { margin: 0; color: var(--felt-text-muted); font-size: var(--felt-text-s-size); line-height: var(--felt-text-s-line); }
+  .mode-link { justify-self: start; padding-left: 0; padding-right: 0; color: var(--felt-text-muted); }
+  .mode-link:hover:not(:disabled) { background: none; color: var(--felt-text); }
+  .rec-file { display: grid; gap: 8px; }
+  .rec-file strong { font-weight: var(--font-weight-medium); overflow-wrap: anywhere; }
+  .rec-file button { justify-self: start; }
   .file-row strong { font-weight: var(--font-weight-medium); overflow-wrap: anywhere; display: block; }
 </style>
 </head>
@@ -302,6 +307,20 @@ if (window.self !== window.top) document.documentElement.classList.add('embed');
           </div>
           <textarea class="field" id="pronounce" data-lpignore="true" data-1p-ignore data-bwignore data-form-type="other" rows="3" spellcheck="false" placeholder="Siobhan = shi vawn&#10;Nguyen = win"></textarea>
         </div>
+        <button class="ghost compact mode-link" id="useRecording"><i data-lucide="mic"></i><span>Use your own recording instead</span></button>
+      </div>
+      <div data-pane="upload" class="hidden" style="display:grid;gap:12px">
+        <div class="drop" id="audioDrop" tabindex="0" role="button" aria-label="Add your recording">
+          <i data-lucide="file-audio"></i><strong>Add your recording</strong><span class="help">MP3, WAV, M4A or MP4. The words become your cards.</span>
+          <input type="file" accept="audio/*,video/mp4,video/quicktime,.m4a,.mov" hidden>
+        </div>
+        <div class="rec-file hidden" id="recFile">
+          <strong id="recName"></strong>
+          <audio id="voicePreview" controls></audio>
+          <button class="ghost compact" id="recReplace"><i data-lucide="refresh-cw"></i><span>Use a different recording</span></button>
+        </div>
+        <p class="help" id="recStatus" role="status" aria-live="polite"></p>
+        <button class="ghost compact mode-link" id="useVoice"><i data-lucide="audio-lines"></i><span>Use a created voice instead</span></button>
       </div>
     </div>
 
@@ -317,7 +336,7 @@ if (window.self !== window.top) document.documentElement.classList.add('embed');
     </div>
   </aside>
 </main>
-<p class="app-version">Version v11 · Oct 13, 2026 6:42 PM</p>
+<p class="app-version">Version v12 · Oct 20, 2026 9:52 AM</p>
 <script>{ const v = document.querySelector('.app-version'); if (v.textContent.includes('__')) v.textContent = 'Local preview (not published)'; }</script>
 
 <div class="scrim hidden" id="exportSheet" role="dialog" aria-modal="true" aria-labelledby="title-exporting">
@@ -367,6 +386,7 @@ const ease = (() => {
 const cv = $('#cv'), ctx = cv.getContext('2d');
 const W = cv.width, H = cv.height;
 const MAX_CARDS = 6;
+const MAX_REC_CARDS = 10, MAX_REC_SECONDS = 90; // cards made from a recording, and its longest length
 const INTRO = 0.7, TAIL = 0.6;     // seconds of opening animation before the voice, and hold after it
 // Brand motion timings (Motion section). Fixed here, because they are part of the video itself.
 const BRAND_MOMENT = 0.7;          // motion-duration-brand: the opening arrives within 700ms
@@ -390,7 +410,8 @@ const state = {
   active: 0,
   mode: 'tts', gender: 'female', msgStyle: 'dark',
   ttsVoice: null,     // { buffer, timeline, key }: the created voice, its exact card timings, and what it was made from
-  uploadBuffer: null, // an uploaded audio file
+  uploadBuffer: null, // an uploaded recording, decoded
+  uploadTimes: null,  // [{ start, end }] per card, from the words in the recording
   playing: false, stopFn: null,
 };
 let audioCtx;
@@ -745,7 +766,191 @@ stage.addEventListener('drop', e => {
 // Stop the browser from opening files dropped elsewhere
 ['dragover', 'drop'].forEach(ev => window.addEventListener(ev, e => e.preventDefault()));
 
+/* ---------- Your own recording: read the words, make the cards ---------- */
+// Whisper runs in its own background worker, in the browser, so the recording never leaves the computer.
+const STT_WORKER = `
+import { pipeline } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.5.1';
+let asr;
+self.onmessage = async ({ data }) => {
+  try {
+    asr ||= await pipeline('automatic-speech-recognition', 'onnx-community/whisper-base.en', {
+      dtype: 'q8', device: 'wasm',
+      progress_callback: p => { if (p.status === 'progress' && p.file.endsWith('.onnx')) self.postMessage({ type: 'progress', progress: p.progress }); },
+    });
+    self.postMessage({ type: 'listening' });
+    // One piece of at most 30 seconds at a time (the page splits longer recordings at pauses)
+    const out = await asr(data.audio, { return_timestamps: true });
+    self.postMessage({ type: 'done', chunks: out.chunks || [{ text: out.text, timestamp: [0, null] }] });
+  } catch (e) {
+    self.postMessage({ type: 'error', message: String(e && e.message || e) });
+  }
+};`;
+let sttWorker = null;
+function transcribePiece(audio, report) {
+  return new Promise((resolve, reject) => {
+    sttWorker ||= new Worker(URL.createObjectURL(new Blob([STT_WORKER], { type: 'text/javascript' })), { type: 'module' });
+    sttWorker.onmessage = ({ data }) => {
+      if (data.type === 'progress') report(`Downloading the speech model: ${Math.round(data.progress)}%`);
+      else if (data.type === 'listening') report('Listening to your recording…');
+      else if (data.type === 'done') resolve(data.chunks);
+      else reject(new Error(data.message));
+    };
+    sttWorker.onerror = e => { sttWorker.terminate(); sttWorker = null; reject(new Error(e.message || 'The speech engine stopped')); };
+    sttWorker.postMessage({ audio }, [audio.buffer]);
+  });
+}
+// Whisper hears 30 seconds at a time, and its own long-audio mode can drop the end.
+// So longer recordings are cut at the quietest moment between 15 and 25 seconds, read piece by piece, and joined.
+async function transcribe(samples, report) {
+  const RATE = 16000, MAX = 25 * RATE, MIN = 15 * RATE, WIN = 0.1 * RATE;
+  const chunks = [];
+  for (let from = 0; from < samples.length;) {
+    let to = samples.length;
+    if (to - from > 30 * RATE) {
+      let best = from + MAX, quietest = Infinity;
+      for (let i = from + MIN; i + WIN <= from + MAX; i += WIN / 2) {
+        let e = 0; for (let j = i; j < i + WIN; j++) e += samples[j] * samples[j];
+        if (e < quietest) { quietest = e; best = i + WIN / 2; }
+      }
+      to = Math.round(best);
+    }
+    const offset = from / RATE, pieceEnd = to / RATE;
+    const piece = await transcribePiece(samples.slice(from, to), report);
+    piece.forEach(c => chunks.push({ text: c.text, timestamp: [offset + (c.timestamp[0] ?? 0), c.timestamp[1] == null ? pieceEnd : offset + c.timestamp[1]] }));
+    from = to;
+  }
+  return chunks;
+}
+// Whisper listens at 16 kHz, mono
+async function toMono16k(buffer) {
+  const off = new OfflineAudioContext(1, Math.ceil(buffer.duration * 16000), 16000);
+  const src = off.createBufferSource(); src.buffer = buffer; src.connect(off.destination); src.start();
+  return (await off.startRendering()).getChannelData(0);
+}
+// Words with times -> sentences -> cards that fit on screen (at most MAX_REC_CARDS).
+// A piece of text inside a timed chunk gets a share of its time by length.
+function splitTimed(text, start, end, pieces) {
+  const total = pieces.reduce((n, p) => n + p.length, 0) || 1;
+  let t = start;
+  return pieces.map(p => { const s = t; t += (end - start) * p.length / total; return { text: p, start: s, end: t }; });
+}
+function cardsFromChunks(chunks, duration) {
+  // 1. Every word with a time (shared out within its chunk by length), then sentences built from the words,
+  //    so a sentence that runs across two chunks stays together
+  const words = [];
+  chunks.forEach((c, i) => {
+    const parts = c.text.trim().split(/\s+/).filter(Boolean); if (!parts.length) return;
+    const start = c.timestamp[0] ?? 0;
+    const end = c.timestamp[1] ?? chunks[i + 1]?.timestamp[0] ?? duration;
+    words.push(...splitTimed(c.text, start, Math.max(start, end), parts));
+  });
+  const sentences = [];
+  let cur = null;
+  for (const w of words) {
+    if (cur) { cur.text += ' ' + w.text; cur.end = w.end; } else cur = { ...w };
+    if (/[.!?]["')\]]*$/.test(w.text)) { sentences.push(cur); cur = null; }
+  }
+  if (cur) sentences.push(cur);
+  if (!sentences.length) return [];
+  // 2. Fill cards up to a length that keeps the text large; allow longer cards only to stay within MAX_REC_CARDS
+  const totalChars = sentences.reduce((n, x) => n + x.text.length + 1, 0);
+  for (let limit = Math.max(110, Math.ceil(totalChars / MAX_REC_CARDS)); ; limit = Math.ceil(limit * 1.15)) {
+    const cards = [];
+    for (const sen of sentences) {
+      // A sentence longer than a card is split between words
+      const pieces = [];
+      if (sen.text.length <= limit) pieces.push(sen.text);
+      else {
+        let line = '';
+        for (const w of sen.text.split(/\s+/)) {
+          if (line && (line + ' ' + w).length > limit) { pieces.push(line); line = w; } else line = line ? line + ' ' + w : w;
+        }
+        if (line) pieces.push(line);
+      }
+      for (const piece of splitTimed(sen.text, sen.start, sen.end, pieces)) {
+        const last = cards[cards.length - 1];
+        if (last && (last.text + ' ' + piece.text).length <= limit) { last.text += ' ' + piece.text; last.end = piece.end; }
+        else cards.push({ ...piece });
+      }
+    }
+    if (cards.length <= MAX_REC_CARDS) {
+      // No gaps: each card stays up until the next one starts; the first starts with the voice, the last holds to the end
+      cards.forEach((c, i) => { c.start = i ? c.start : 0; c.end = cards[i + 1]?.start ?? duration; });
+      return cards;
+    }
+  }
+}
+const recStatus = (msg, tone = '') => { $('#recStatus').textContent = msg; $('#recStatus').dataset.tone = tone; };
+let reading = false;
+async function setRecording(file) {
+  if (reading) return;
+  const ok = file && (file.type.startsWith('audio/') || file.type.startsWith('video/') || /\.(m4a|mp3|wav|mp4|mov)$/i.test(file.name));
+  if (!ok) return recStatus('That file is not a recording. Try MP3, WAV, M4A or MP4.', 'error');
+  stopPreview();
+  reading = true;
+  $('#playBtn').disabled = $('#exportBtn').disabled = true;
+  $('#audioDrop').classList.add('hidden');
+  try {
+    recStatus('Opening your recording…');
+    let buffer;
+    try { buffer = await getAudioCtx().decodeAudioData(await file.arrayBuffer()); }
+    catch { throw new Error('unreadable'); }
+    if (buffer.duration > MAX_REC_SECONDS) throw new Error('too-long');
+    state.uploadBuffer = buffer; state.uploadTimes = null;
+    $('#recName').textContent = file.name;
+    $('#voicePreview').src = URL.createObjectURL(file);
+    $('#recFile').classList.remove('hidden');
+    const chunks = await transcribe(await toMono16k(buffer), msg => recStatus(msg));
+    const cards = cardsFromChunks(chunks, buffer.duration);
+    if (!cards.length) { recStatus('No words were heard in this recording. You can still type your cards.', 'error'); return; }
+    state.cards = cards.map(c => c.text);
+    state.aligns = cards.map(() => 'center');
+    state.uploadTimes = cards.map(({ start, end }) => ({ start, end }));
+    selectCard(0);
+    recStatus(`${cards.length === 1 ? 'One card was' : cards.length + ' cards were'} made from your recording. Check the words and fix anything that was misheard.`);
+  } catch (e) {
+    console.error(e);
+    const msg = e.message === 'unreadable' ? 'That file could not be read. Try MP3, WAV, M4A or MP4.'
+      : e.message === 'too-long' ? 'That recording is longer than 90 seconds. Please use a shorter one.'
+      : 'The words could not be read from your recording. Check your connection and try again.';
+    if (e.message === 'unreadable' || e.message === 'too-long') clearRecording();
+    recStatus(msg, 'error');
+  } finally {
+    reading = false;
+    $('#playBtn').disabled = $('#exportBtn').disabled = false;
+  }
+}
+function clearRecording() {
+  state.uploadBuffer = null; state.uploadTimes = null;
+  $('#recFile').classList.add('hidden'); $('#audioDrop').classList.remove('hidden');
+  $('#voicePreview').removeAttribute('src');
+}
+function setMode(mode) {
+  if (reading) return;
+  stopPreview();
+  state.mode = mode;
+  document.querySelectorAll('[data-pane]').forEach(p => p.classList.toggle('hidden', p.dataset.pane !== mode));
+  if (mode === 'tts') recStatus('');
+}
+$('#useRecording').addEventListener('click', () => setMode('upload'));
+$('#useVoice').addEventListener('click', () => setMode('tts'));
+(() => {
+  const el = $('#audioDrop'), input = el.querySelector('input');
+  el.addEventListener('click', () => input.click());
+  el.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); input.click(); } });
+  input.addEventListener('change', () => { setRecording(input.files[0]); input.value = ''; });
+  el.addEventListener('dragover', e => { e.preventDefault(); el.classList.add('over'); });
+  el.addEventListener('dragleave', () => el.classList.remove('over'));
+  el.addEventListener('drop', e => { e.preventDefault(); el.classList.remove('over'); setRecording(e.dataTransfer.files[0]); });
+  $('#recReplace').addEventListener('click', () => input.click());
+})();
+
 /* ---------- Card timing ---------- */
+// Cards made from a recording show while their words are spoken. If cards were added or removed since, fall back to sharing by length.
+function uploadTimeline() {
+  const cards = cardTexts(), times = state.uploadTimes;
+  return times && times.length === cards.length ? cards.map((text, i) => ({ text, ...times[i] })) : null;
+}
 // Without exact timings (uploaded audio), cards share the duration by text length
 function timeline(cards, duration) {
   const weights = cards.map(c => c.length + 10);
@@ -760,7 +965,7 @@ const estimateDuration = cards => Math.max(3, cards.join(' ').split(/\s+/).lengt
 // The voice in use: the uploaded file, or the created voice if it still matches the cards, voice and pronunciations
 const voiceKey = () => JSON.stringify([state.gender, cardTexts(), pronunciations()]);
 const activeVoice = () => state.mode === 'upload'
-  ? (state.uploadBuffer && { buffer: state.uploadBuffer, timeline: null })
+  ? (state.uploadBuffer && { buffer: state.uploadBuffer, timeline: uploadTimeline() })
   : (state.ttsVoice?.key === voiceKey() ? state.ttsVoice : null);
 const needsVoice = () => state.mode === 'tts' && !activeVoice();
 const voiceDuration = () => activeVoice()?.buffer.duration ?? estimateDuration(cardTexts());
@@ -971,7 +1176,7 @@ $('#playBtn').addEventListener('click', async () => {
       setPlayBtn(false);
     }
   }
-  if (state.mode === 'upload' && !state.uploadBuffer) status('No audio file added yet, so this preview has on-screen messages only.');
+  if (state.mode === 'upload' && !state.uploadBuffer) status('No recording added yet, so this preview has on-screen messages only.');
   setPlayBtn(true);
   play({ onDone: () => setPlayBtn(false) });
 });
