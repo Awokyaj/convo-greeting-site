@@ -212,8 +212,7 @@
   .problem .tell { color: var(--felt-text, #fff); }
   .problem .detail { font-size: var(--felt-text-xxs-size, 12px); line-height: 1.4; overflow-wrap: anywhere; opacity: 0.8; }
   .problem .sheet-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; margin-top: 8px; }
-  .problem a.primary { display: inline-flex; align-items: center; gap: 8px; text-decoration: none; padding: 10px 20px; border-radius: var(--radius-pill, 999px);
-                       background: var(--felt-primary, #00aa55); color: var(--felt-on-primary, #000); font-weight: var(--font-weight-medium, 500); }
+  .problem button.primary { background: var(--felt-primary, #00aa55); color: var(--felt-on-primary, #000); }
   .problem button { font: inherit; }
   .file-row strong { font-weight: var(--font-weight-medium); overflow-wrap: anywhere; display: block; }
 </style>
@@ -347,7 +346,7 @@ if (window.self !== window.top) document.documentElement.classList.add('embed');
     </div>
   </aside>
 </main>
-<p class="app-version">Version v13 · Oct 20, 2026 9:58 AM</p>
+<p class="app-version">Version v14 · Oct 20, 2026 10:01 AM</p>
 <script>{ const v = document.querySelector('.app-version'); if (v.textContent.includes('__')) v.textContent = 'Local preview (not published)'; }</script>
 
 <div class="scrim problem hidden" id="problemSheet" role="alertdialog" aria-modal="true" aria-labelledby="problemTitle" aria-describedby="problemText">
@@ -355,11 +354,10 @@ if (window.self !== window.top) document.documentElement.classList.add('embed');
     <h2 id="problemTitle"></h2>
     <p id="problemText"></p>
     <p class="detail" id="problemDetail"></p>
-    <p class="tell">Still not working? Please let Jay know. A quick note helps get it fixed for everyone.</p>
+    <p class="tell">Still not working? Please notify Jay via Slack. Copy the details into your message so it can be fixed quickly.</p>
     <div class="sheet-actions">
-      <button class="ghost" id="problemCopy">Copy details</button>
       <button class="ghost" id="problemClose">Close</button>
-      <a class="primary" id="problemEmail" target="_blank" rel="noopener">Email Jay</a>
+      <button class="primary" id="problemCopy">Copy details</button>
     </div>
   </div>
 </div>
@@ -389,8 +387,7 @@ if (window.self !== window.top) document.documentElement.classList.add('embed');
 <script>
 const $ = s => document.querySelector(s);
 
-/* ---------- When something breaks: tell the viewer kindly, and make it easy to tell Jay ---------- */
-const REPORT_TO = 'jay@convorelay.com';
+/* ---------- When something breaks: tell the viewer kindly, and ask them to tell Jay on Slack ---------- */
 const PROBLEMS = {
   voice:   ['We couldn\u2019t create the voice', 'The voice didn\u2019t load this time. This is usually a short hiccup, so please try again in a minute.'],
   speech:  ['We couldn\u2019t read your recording', 'The part that turns your recording into cards didn\u2019t load. Your recording is still here, so please try again in a minute.'],
@@ -425,7 +422,6 @@ function reportProblem(kind, err) {
     `Browser: ${navigator.userAgent}`,
     `Time: ${new Date().toString()}`,
   ].join('\n');
-  $('#problemEmail').href = `mailto:${REPORT_TO}?subject=${encodeURIComponent('Convo Greeting: ' + title)}&body=${encodeURIComponent('Hi Jay,\n\nConvo Greeting showed me an error.\n\n' + problemDetails + '\n')}`;
   clearStep();
   $('#problemCopy').textContent = 'Copy details';
   $('#problemSheet').classList.remove('hidden');
